@@ -11,8 +11,8 @@ namespace NMATH {
     constexpr float HALF_PI = 1.57079632679489661923f;
     constexpr float EPS     = 1e-6f;
 
-    inline float abs(float v) { return (v < 0) ? -v : v; }
-    inline int abs(int v) { return (v < 0) ? -v : v; }
+    inline float absf(float v) { return (v < 0) ? -v : v; }
+    inline int absi(int v) { return (v < 0) ? -v : v; }
 
     inline float min(float a, float b) { return (a < b) ? a : b; }
     inline float max(float a, float b) { return (a > b) ? a : b; }
@@ -51,14 +51,6 @@ namespace NMATH {
         while (a >  PI) a -= TWO_PI;
         while (a < -PI) a += TWO_PI;
         return a;
-    }
-
-    inline float tanHalf(float fovyRad){
-        float s = sin(fovyRad * 0.5f);
-        float c = cos(fovyRad * 0.5f);
-        // avoid divide-by-zero with crude guard
-        if (abs(c) < 1e-6f) c = (c>=0 ? 1e-6f : -1e-6f);
-        return s / c;
     }
 
 }

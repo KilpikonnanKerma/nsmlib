@@ -8,6 +8,12 @@ namespace NMATH {
     struct Mat4 {
         float m[4][4];
 
+        Mat4(float diagonal=1.0f) {
+            for(int i=0;i<4;i++)
+                for(int j=0;j<4;j++)
+                    m[i][j] = (i==j) ? diagonal : 0.0f;
+        }
+
         static Mat4 identity() {
             Mat4 r{};
             r.m[0][0]=1; r.m[1][1]=1; r.m[2][2]=1; r.m[3][3]=1;
@@ -25,6 +31,14 @@ namespace NMATH {
             return r;
         }
 
+        Vec4d operator*(const Vec4d& v) const {
+            Vec4d r;
+            r.x = m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z + m[0][3]*v.w;
+            r.y = m[1][0]*v.x + m[1][1]*v.y + m[1][2]*v.z + m[1][3]*v.w;
+            r.z = m[2][0]*v.x + m[2][1]*v.y + m[2][2]*v.z + m[2][3]*v.w;
+            r.w = m[3][0]*v.x + m[3][1]*v.y + m[3][2]*v.z + m[3][3]*v.w;
+            return r;
+        }
         // Transform a point (assumes w=1)
         Vec3d transformPoint(const Vec3d& v) const {
             float x_ = m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z + m[0][3];
@@ -64,19 +78,124 @@ namespace NMATH {
             r.m[2][2] = 1.0f - 2.0f*(xx+yy);
             return r;
         }
+
+        const float* value_ptr() const {
+            thread_local float tmp[16];
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    tmp[c*4 + r] = m[r][c];
+            return tmp;
+        }
+
+        float* value_ptr() {
+            thread_local float tmp[16];
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    tmp[c*4 + r] = m[r][c];
+            return tmp;
+        }
+
+        Mat4 inverse() const {
+            Mat4 inv;
+            double det;
+
+            inv.m[0][0] = m[1][1]*m[2][2]*m[3][3] - m[1][1]*m[2][3]*m[3][2] - m[2][1]*m[1][2]*m[3][3]
+                        + m[2][1]*m[1][3]*m[3][2] + m[3][1]*m[1][2]*m[2][3] - m[3][1]*m[1][3]*m[2][2];
+
+            inv.m[0][1] = -m[0][1]*m[2][2]*m[3][3] + m[0][1]*m[2][3]*m[3][2] + m[2][1]*m[0][2]*m[3][3]
+                        - m[2][1]*m[0][3]*m[3][2] - m[3][1]*m[0][2]*m[2][3] + m[3][1]*m[0][3]*m[2][2];
+
+            inv.m[0][2] = m[0][1]*m[1][2]*m[3][3] - m[0][1]*m[1][3]*m[3][2] - m[1][1]*m[0][2]*m[3][3]
+                        + m[1][1]*m[0][3]*m[3][2] + m[3][1]*m[0][2]*m[1][3] - m[3][1]*m[0][3]*m[1][2];
+
+            inv.m[0][3] = -m[0][1]*m[1][2]*m[2][3] + m[0][1]*m[1][3]*m[2][2] + m[1][1]*m[0][2]*m[2][3]
+                        - m[1][1]*m[0][3]*m[2][2] - m[2][1]*m[0][2]*m[1][3] + m[2][1]*m[0][3]*m[1][2];
+
+            inv.m[1][0] = -m[1][0]*m[2][2]*m[3][3] + m[1][0]*m[2][3]*m[3][2] + m[2][0]*m[1][2]*m[3][3]
+                        - m[2][0]*m[1][3]*m[3][2] - m[3][0]*m[1][2]*m[2][3] + m[3][0]*m[1][3]*m[2][2];
+
+            inv.m[1][1] = m[0][0]*m[2][2]*m[3][3] - m[0][0]*m[2][3]*m[3][2] - m[2][0]*m[0][2]*m[3][3]
+                        + m[2][0]*m[0][3]*m[3][2] + m[3][0]*m[0][2]*m[2][3] - m[3][0]*m[0][3]*m[2][2];
+
+            inv.m[1][2] = -m[0][0]*m[1][2]*m[3][3] + m[0][0]*m[1][3]*m[3][2] + m[1][0]*m[0][2]*m[3][3]
+                        - m[1][0]*m[0][3]*m[3][2] - m[3][0]*m[0][2]*m[1][3] + m[3][0]*m[0][3]*m[1][2];
+
+            inv.m[1][3] = m[0][0]*m[1][2]*m[2][3] - m[0][0]*m[1][3]*m[2][2] - m[1][0]*m[0][2]*m[2][3]
+                        + m[1][0]*m[0][3]*m[2][2] + m[2][0]*m[0][2]*m[1][3] - m[2][0]*m[0][3]*m[1][2];
+
+            inv.m[2][0] = m[1][0]*m[2][1]*m[3][3] - m[1][0]*m[2][3]*m[3][1] - m[2][0]*m[1][1]*m[3][3]
+                        + m[2][0]*m[1][3]*m[3][1] + m[3][0]*m[1][1]*m[2][3] - m[3][0]*m[1][3]*m[2][1];
+
+            inv.m[2][1] = -m[0][0]*m[2][1]*m[3][3] + m[0][0]*m[2][3]*m[3][1] + m[2][0]*m[0][1]*m[3][3]
+                        - m[2][0]*m[0][3]*m[3][1] - m[3][0]*m[0][1]*m[2][3] + m[3][0]*m[0][3]*m[2][1];
+
+            inv.m[2][2] = m[0][0]*m[1][1]*m[3][3] - m[0][0]*m[1][3]*m[3][1] - m[1][0]*m[0][1]*m[3][3]
+                        + m[1][0]*m[0][3]*m[3][1] + m[3][0]*m[0][1]*m[1][3] - m[3][0]*m[0][3]*m[1][1];
+
+            inv.m[2][3] = -m[0][0]*m[1][1]*m[2][3] + m[0][0]*m[1][3]*m[2][1] + m[1][0]*m[0][1]*m[2][3]
+                        - m[1][0]*m[0][3]*m[2][1] - m[2][0]*m[0][1]*m[1][3] + m[2][0]*m[0][3]*m[1][1];
+
+            inv.m[3][0] = -m[1][0]*m[2][1]*m[3][2] + m[1][0]*m[2][2]*m[3][1] + m[2][0]*m[1][1]*m[3][2]
+                        - m[2][0]*m[1][2]*m[3][1] - m[3][0]*m[1][1]*m[2][2] + m[3][0]*m[1][2]*m[2][1];
+
+            inv.m[3][1] = m[0][0]*m[2][1]*m[3][2] - m[0][0]*m[2][2]*m[3][1] - m[2][0]*m[0][1]*m[3][2]
+                        + m[2][0]*m[0][2]*m[3][1] + m[3][0]*m[0][1]*m[2][2] - m[3][0]*m[0][2]*m[2][1];
+
+            inv.m[3][2] = -m[0][0]*m[1][1]*m[3][2] + m[0][0]*m[1][2]*m[3][1] + m[1][0]*m[0][1]*m[3][2]
+                        - m[1][0]*m[0][2]*m[3][1] - m[3][0]*m[0][1]*m[1][2] + m[3][0]*m[0][2]*m[1][1];
+
+            inv.m[3][3] = m[0][0]*m[1][1]*m[2][2] - m[0][0]*m[1][2]*m[2][1] - m[1][0]*m[0][1]*m[2][2]
+                        + m[1][0]*m[0][2]*m[2][1] + m[2][0]*m[0][1]*m[1][2] - m[2][0]*m[0][2]*m[1][1];
+
+            det = m[0][0]*inv.m[0][0] + m[0][1]*inv.m[1][0] + m[0][2]*inv.m[2][0] + m[0][3]*inv.m[3][0];
+
+            if(det == 0.0) return identity(); // singular, return identity
+
+            det = 1.0 / det;
+            for(int i=0;i<4;i++)
+                for(int j=0;j<4;j++)
+                    inv.m[i][j] *= det;
+
+            return inv;
+        }
     };
 
-    // Transform builders
-    inline Mat4 translate(const Vec3d& t) {
-        Mat4 r = Mat4::identity();
-        r.m[0][3] = t.x; r.m[1][3] = t.y; r.m[2][3] = t.z;
-        return r;
+    inline Mat4 translate(const Mat4& mat, const Vec3d& v) {
+        Mat4 result = mat;
+        result.m[0][3] += v.x;
+        result.m[1][3] += v.y;
+        result.m[2][3] += v.z;
+        return result;
     }
 
-    inline Mat4 scale(const Vec3d& s) {
-        Mat4 r{};
-        r.m[0][0]=s.x; r.m[1][1]=s.y; r.m[2][2]=s.z; r.m[3][3]=1.0f;
-        return r;
+    inline Mat4 scale(const Mat4& m, const Vec3d& v) {
+        Mat4 result = m;
+        result.m[0][0] *= v.x;
+        result.m[1][1] *= v.y;
+        result.m[2][2] *= v.z;
+        return result;
+    }
+
+    inline Mat4 rotate(const Mat4& m, double angle, const Vec3d& axis) {
+        Vec3d a = axis.normalized();
+        double c = cos(angle);
+        double s = sin(angle);
+        double ic = 1.0 - c;
+
+        Mat4 rot(1.0);
+        rot.m[0][0] = c + a.x * a.x * ic;
+        rot.m[0][1] = a.x * a.y * ic - a.z * s;
+        rot.m[0][2] = a.x * a.z * ic + a.y * s;
+
+        rot.m[1][0] = a.y * a.x * ic + a.z * s;
+        rot.m[1][1] = c + a.y * a.y * ic;
+        rot.m[1][2] = a.y * a.z * ic - a.x * s;
+
+        rot.m[2][0] = a.z * a.x * ic - a.y * s;
+        rot.m[2][1] = a.z * a.y * ic + a.x * s;
+        rot.m[2][2] = c + a.z * a.z * ic;
+
+        return m * rot;
     }
 
     inline Mat4 rotateX(float a) {
@@ -104,26 +223,27 @@ namespace NMATH {
 
     // Camera & projection
     inline Mat4 lookAt(const Vec3d& eye, const Vec3d& center, const Vec3d& up) {
-        Vec3d f = (center - eye).normalized();
-        Vec3d r = f.cross(up).normalized();
-        Vec3d u = r.cross(f);
+    // Standard lookAt constructing a view matrix in row-major layout.
+    Vec3d f = (center - eye).normalized();
+    Vec3d s = f.cross(up).normalized(); // right
+    Vec3d u = s.cross(f).normalized();  // true up (orthogonalized)
 
-        Mat4 m = Mat4::identity();
-        m.m[0][0]= r.x; m.m[0][1]= r.y; m.m[0][2]= r.z; m.m[0][3]= -r.dot(eye);
-        m.m[1][0]= u.x; m.m[1][1]= u.y; m.m[1][2]= u.z; m.m[1][3]= -u.dot(eye);
-        m.m[2][0]=-f.x; m.m[2][1]=-f.y; m.m[2][2]=-f.z; m.m[2][3]=  f.dot(eye);
-        // m.m[3][3]=1 already from identity
-        return m;
+    Mat4 m = Mat4::identity();
+    // Row-major assignment: m[row][col]
+    m.m[0][0] = s.x; m.m[0][1] = s.y; m.m[0][2] = s.z; m.m[0][3] = -s.dot(eye);
+    m.m[1][0] = u.x; m.m[1][1] = u.y; m.m[1][2] = u.z; m.m[1][3] = -u.dot(eye);
+    m.m[2][0] = -f.x; m.m[2][1] = -f.y; m.m[2][2] = -f.z; m.m[2][3] = f.dot(eye);
+    m.m[3][0] = 0.0f; m.m[3][1] = 0.0f; m.m[3][2] = 0.0f; m.m[3][3] = 1.0f;
+    return m;
     }
 
     inline Mat4 perspective(float fovyRad, float aspect, float zNear, float zFar) {
-        // Right-handed, depth in [0,1] after perspective divide depends on your API.
-        float f = 1.0f / tanHalf(fovyRad);
+        float f = 1.0f / tan(fovyRad / 2.0f);
         Mat4 m{};
         m.m[0][0] = f / aspect;
         m.m[1][1] = f;
-        m.m[2][2] = (zFar + zNear) / (zNear - zFar);
-        m.m[2][3] = (2.0f * zFar * zNear) / (zNear - zFar);
+        m.m[2][2] = -(zFar + zNear) / (zFar - zNear);
+        m.m[2][3] = -(2.0f * zFar * zNear) / (zFar - zNear);
         m.m[3][2] = -1.0f;
         return m;
     }

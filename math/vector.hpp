@@ -93,6 +93,8 @@ namespace NMATH {
         }
         float length() const { return sqrt(x * x + y * y + z * z); }
         Vec3d normalized() const { float len = length(); return (len == 0) ? Vec3d() : (*this) / len; }
+
+        Vec3d operator-() const { return Vec3d(-x, -y, -z); }
     };
 
     inline bool intersectRaySphere(const Vec3d& rayOrig, const Vec3d& rayDir,

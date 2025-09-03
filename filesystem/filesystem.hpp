@@ -131,7 +131,7 @@ namespace fs {
 		directory_entry(const path& p) : _p(p) {}
 
 		const path& path_() const { return _p; }
-		path path() const { return _p; }
+		path getpath() const { return _p; }
 
 		bool is_directory() const { return fs::is_directory(_p); }
 	};

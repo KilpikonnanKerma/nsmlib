@@ -79,6 +79,14 @@ namespace NMATH {
             return r;
         }
 
+        static Mat4 scaleMatrix(const Vec3d& s) {
+            Mat4 m(1.0f);
+            m.m[0][0] = s.x;
+            m.m[1][1] = s.y;
+            m.m[2][2] = s.z;
+            return m;
+        }
+
         const float* value_ptr() const {
             thread_local float tmp[16];
             for (int r = 0; r < 4; ++r)

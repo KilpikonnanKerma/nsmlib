@@ -216,6 +216,12 @@ namespace fs {
 		return ::rename(from.c_str(), to.c_str()) == 0;
 	}
 
+// (FREE)
+	inline void free(void* ptr) {
+		if (!ptr) return;
+		std::free(ptr);
+	}
+
 // (CURRENT_PATH)
 	inline std::string current_path() {
 #if defined(_WIN32)

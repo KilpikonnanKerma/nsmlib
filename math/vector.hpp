@@ -113,6 +113,30 @@ namespace NMATH {
         if(t < 0.0f) t = 0.0f;
         return true;
     }
+
+    static bool IntersectRayTriangle(const Vec3d& orig, const Vec3d& dir,
+        const Vec3d& v0, const Vec3d& v1, const Vec3d& v2,
+        float& outT)
+    {
+        // Möller–Trumbore
+        const float EPS = 1e-6f;
+        Vec3d edge1 = v1 - v0;
+        Vec3d edge2 = v2 - v0;
+        Vec3d pvec = dir.cross(edge2);
+        float det = edge1.dot(pvec);
+        if (det > -EPS && det < EPS) return false; // parallel
+        float invDet = 1.0f / det;
+        Vec3d tvec = orig - v0;
+        float u = tvec.dot(pvec) * invDet;
+        if (u < 0.0f || u > 1.0f) return false;
+        Vec3d qvec = tvec.cross(edge1);
+        float v = dir.dot(qvec) * invDet;
+        if (v < 0.0f || u + v > 1.0f) return false;
+        float t = edge2.dot(qvec) * invDet;
+        if (t <= EPS) return false; // behind ray or too close
+        outT = t;
+        return true;
+    }
 }
 
 #endif

@@ -144,31 +144,35 @@ namespace fs {
 		if (exists(pstr)) {
 			// if it's a directory, return true; otherwise can't create
 			path pp(pstr);
-			if (is_directory(pp)) return true;
-			return false;
+			return is_directory(pp);
 		}
 
 		// iterate components
 		std::string cur;
+		size_t i = 0;
+
 #if defined(_WIN32)
 		// handle drive letter "C:\"
 		if (pstr.size() >= 2 && pstr[1] == ':') {
 			cur = pstr.substr(0, 2); // "C:"
+			i = 2;
 			// if it begins with "C:\" include the separator
 			if (pstr.size() >= 3 && (pstr[2] == '\\' || pstr[2] == '/')) {
 				cur += PATH_SEP;
+				i = 3;
 			}
 		}
 		else if (!pstr.empty() && (pstr[0] == '\\' || pstr[0] == '/')) {
 			cur = std::string(1, PATH_SEP);
+			i = 1;
 		}
 #else
 		if (!pstr.empty() && pstr[0] == '/') {
 			cur = std::string(1, PATH_SEP);
+			i = 1;
 		}
 #endif
 
-		size_t i = 0;
 		while (i < pstr.size()) {
 			// find next separator
 			size_t pos = pstr.find_first_of("/\\", i);
@@ -176,23 +180,26 @@ namespace fs {
 			if (pos == std::string::npos) {
 				part = pstr.substr(i);
 				i = pstr.size();
-			}
-			else {
+			} else {
 				part = pstr.substr(i, pos - i);
 				i = pos + 1;
 			}
+
 			if (!part.empty()) {
-				if (!cur.empty() && cur[cur.size() - 1] != PATH_SEP) cur += PATH_SEP;
+				if (!cur.empty() && cur.back() != PATH_SEP) {
+					cur += PATH_SEP;
+				}
+
 				cur += part;
 			}
+
 			// create cur if not exists
 			if (!cur.empty() && !exists(cur)) {
 #if defined(_WIN32)
-				int r = _mkdir(cur.c_str());
+				if (_mkdir(cur.c_str()) != 0 && errno != EEXIST) return false;
 #else
-				int r = mkdir(cur.c_str(), 0755);
+				if (mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) return false;
 #endif
-				if (r != 0 && errno != EEXIST) return false;
 			}
 		}
 		// final check
@@ -333,17 +340,39 @@ namespace fs {
 	inline bool copy_directory(const path& src, const path& dst, int options = copy_options_none) {
 		if (!exists(src) || !is_directory(src)) return false;
 
-		// create destination dir
+		// Normalize small path strings to avoid trailing sep issues
+		auto normalize_no_trailing = [](std::string s) -> std::string {
+			while (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+			return s;
+		};
+
+		std::string srcStr = normalize_no_trailing(src.string());
+		std::string dstStr = normalize_no_trailing(dst.string());
+
+		// Prevent copying src into src (exact) or into a descendant of src
+		if (dstStr == srcStr) return false;
+		if (dstStr.size() > srcStr.size()) {
+			if (dstStr.compare(0, srcStr.size(), srcStr) == 0) {
+				// ensure the next char is a separator so we only match true subpaths
+				char next = dstStr[srcStr.size()];
+				if (next == '/' || next == '\\') return false;
+			}
+		}
+
+		// Ensure destination exists
 		if (!exists(dst)) {
 			if (!create_directories(dst.string())) return false;
 		}
+		else if (!is_directory(dst)) {
+			return false;
+		}
 
-		// iterate entries
+		// iterate entries in src
 		fs::directory_iterator dit(src);
 		for (std::vector<fs::directory_entry>::iterator it = dit.begin(); it != dit.end(); ++it) {
 			path child = it->getpath();
-			// compute destination path
-			path destChild = dst / child.filename();
+			path destChild = dst / child.filename(); // use operator/ to handle separators
+
 			if (it->is_directory()) {
 				if (!(options & copy_options_recursive)) continue;
 				if (!copy_directory(child, destChild, options)) return false;
@@ -362,8 +391,7 @@ namespace fs {
 			// if recursion not requested fail
 			if (!(options & copy_options_recursive)) return false;
 			return copy_directory(src, dst, options);
-		}
-		else {
+		} else {
 			return copy_file(src, dst, options);
 		}
 	}

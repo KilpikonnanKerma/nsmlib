@@ -82,6 +82,14 @@ namespace fs {
 			return path(m_path.substr(pos + 1));
 		}
 
+		path extension() const {
+			std::string fname = filename().string();
+			size_t pos = fname.find_last_of('.');
+			if (pos == std::string::npos) { return path(std::string()); }
+			if (pos == 0) { return path(std::string()); }
+			return path(fname.substr(pos));
+		}
+
 		path operator/(const path& other) const {
 			if (m_path.empty()) return other;
 			// avoid double separator if already ends with one

@@ -14,8 +14,8 @@ namespace NMATH {
     inline float absf(float v) { return (v < 0) ? -v : v; }
     inline int absi(int v) { return (v < 0) ? -v : v; }
 
-    inline float min(float a, float b) { return (a < b) ? a : b; }
-    inline float max(float a, float b) { return (a > b) ? a : b; }
+    inline float minf(float a, float b) { return (a < b) ? a : b; }
+    inline float maxf(float a, float b) { return (a > b) ? a : b; }
 
     inline float clamp(float v, float lo, float hi) {
         return (v < lo) ? lo : (v > hi ? hi : v);

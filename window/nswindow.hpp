@@ -12,11 +12,8 @@
 #ifndef NSWINDOW_HPP
 #define NSWINDOW_HPP
 
-#include <string>
 #include <stdexcept>
 #include <queue>
-
-#include <GL/gl.h>
 
 #if defined(_WIN32)
 #ifndef GET_X_LPARAM
@@ -29,7 +26,15 @@
 #include <windows.h>
 #endif
 
+#ifdef NSWINDOW_IMPL_OPENGL
+#include <gl/GL.h>
+#endif
+
 namespace NSWindow {
+
+	constexpr int MaxTitleLen = 64;
+	constexpr int MaxTextInput = 64;
+	constexpr int MaxEvents = 16;
 
 	enum class EventType {
 		None, Close, Resize, Move, FocusGained, FocusLost, Minimized, Maximized, Restored
@@ -44,7 +49,7 @@ namespace NSWindow {
 	};
 
 	struct WindowDesc {
-		std::string title = "NSWindow";
+		char title[MaxTitleLen] = "NSWindow";
 		int width = 800;
 		int height = 600;
 
@@ -57,6 +62,7 @@ namespace NSWindow {
 	public:
 		Window(const WindowDesc& desc) {
 			impl = new Impl(desc);
+			impl->createGLContext();
 		}
 
 		~Window() {
@@ -70,7 +76,7 @@ namespace NSWindow {
 		void* nativeHandle() const { return impl->nativeHandle(); }
 
 		void setTitle(const char* title) { impl->setTitle(title); }
-		const char* getTitle() const { return impl->title.c_str(); }
+		const char* getTitle() const { return impl->title; }
 
 		void setPosition(int x, int y) { impl->setPosition(x, y); }
 		void getPosition(int& x, int& y) const { impl->getPosition(x, y); }
@@ -87,23 +93,37 @@ namespace NSWindow {
 		void setCursorPos(int x, int y) { impl->setCursorPos(x, y); }
 		bool pollEvent(Event& e) { return impl->pollEvent(e); }
 
-		void makeGLCurrent() { impl->makeGLCurrent(); }
 		void swapBuffers() { impl->swapBuffers(); }
+
+#ifdef _WIN32
+		HWND hwnd() const { return static_cast<HWND>(impl->nativeHandle()); }
+		HDC hdc() const { return impl->hdc; }
+#endif
+
+#ifdef NSWINDOW_IMPL_OPENGL
+		void makeGLCurrent() { impl->makeGLCurrent(); }
+		void setVSync(int interval) { impl->setVSync(interval); }
+#endif
 
 	private:
 		struct Impl {
 			HWND hwnd = nullptr;
-			std::string title;
+			char title[MaxTitleLen];
 			bool shouldClose = false;
 			bool keys[256] = {};
 			bool mouseButtons[5] = {};
 			int mouseX = 0, mouseY = 0;
 			int mouseWheel = 0, mouseHWheel = 0;
-			std::string textInputBuffer;
+			char textInputBuffer[MaxTextInput];
 			std::queue<Event> eventQueue;
 
 			HDC hdc = nullptr;
 			HGLRC hglrc = nullptr;
+
+#ifdef NSWINDOW_IMPL_OPENGL
+			typedef BOOL(WINAPI* PFNWGLSWAPINTERVALEXTPROC)(int);
+			PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = nullptr;
+#endif
 
 			static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 				Impl* self = reinterpret_cast<Impl*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
@@ -152,7 +172,13 @@ namespace NSWindow {
 					if (self) self->mouseHWheel += GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 					break;
 				case WM_CHAR:
-				    if (self) self->textInputBuffer.push_back((char)wParam);
+				    if (self) {
+				        size_t len = strnlen_s(self->textInputBuffer, MaxTextInput - 1);
+				        if (len < MaxTextInput - 1) {
+				            self->textInputBuffer[len] = (char)wParam;
+				            self->textInputBuffer[len + 1] = '\0';
+				        }
+				    }
 				    break;
 				case WM_SIZE:
 				    if (self) {
@@ -184,7 +210,10 @@ namespace NSWindow {
 				return DefWindowProc(hwnd, uMsg, wParam, lParam);
 			}
 
-			Impl(const WindowDesc& desc) : title(desc.title) {
+			Impl(const WindowDesc& desc) {
+				strncpy(title, desc.title, MaxTitleLen - 1);
+				title[MaxTitleLen - 1] = '\0';
+
 				WNDCLASS wc = {};
 				wc.lpfnWndProc = WindowProc;
 				wc.hInstance = GetModuleHandle(nullptr);
@@ -199,7 +228,7 @@ namespace NSWindow {
 				if (desc.borderless) style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU);
 
 				hwnd = CreateWindowExW(
-					0, L"NSWindowClass", std::wstring(title.begin(), title.end()).c_str(),
+					0, L"NSWindowClass", std::wstring(title, title + strnlen(title, MaxTitleLen)).c_str(),
 					style | WS_VISIBLE,
 					CW_USEDEFAULT, CW_USEDEFAULT,
 					rect.right - rect.left, rect.bottom - rect.top,
@@ -234,8 +263,9 @@ namespace NSWindow {
 			}
 
 			void setTitle(const char* newTitle) {
-				title = newTitle;
-				SetWindowText(hwnd, title.c_str());
+				strncpy(title, newTitle, MaxTitleLen - 1);
+				title[MaxTitleLen - 1] = '\0';
+				SetWindowText(hwnd, title);
 			}
 
 			void setPosition(int x, int y) { SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER); }
@@ -270,7 +300,22 @@ namespace NSWindow {
 				return hwnd;
 			}
 
+			void swapBuffers() {
+				SwapBuffers(hdc);
+			}
+
 			// OpenGL context management
+
+#ifdef NSWINDOW_IMPL_OPENGL
+
+			void setVSync(int interval) {
+				if (!wglSwapIntervalEXT) {
+					wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+				}
+				if (wglSwapIntervalEXT) {
+					wglSwapIntervalEXT(interval);
+				}
+			}
 
 			void createGLContext() {
 				hdc = GetDC(hwnd);
@@ -290,6 +335,8 @@ namespace NSWindow {
 
 				hglrc = wglCreateContext(hdc);
 				wglMakeCurrent(hdc, hglrc);
+
+				wglSwapIntervalEXT = nullptr;
 			}
 
 			void destroyGLContext() {
@@ -305,12 +352,8 @@ namespace NSWindow {
 			}
 
 			void makeGLCurrent() { wglMakeCurrent(hdc, hglrc); }
-
-			void swapBuffers() {
-				SwapBuffers(hdc);
-			}
+#endif
 		};
-
 
 		Impl* impl;
 	};

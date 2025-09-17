@@ -11,5 +11,5 @@ file(GLOB SOURCES "test/*.cpp")
 
 add_executable(NSM ${SOURCES})
 
-target_include_directories(NSM PRIVATE math/ filesystem/ window/)
-target_link_libraries(NSM PRIVATE OpenGL::GL)
+target_include_directories(NSM PRIVATE / filesystem/ window/)
+target_link_libraries(NSM PRIVATE opengl32)

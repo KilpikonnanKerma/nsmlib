@@ -150,8 +150,8 @@ namespace NSImgui {
 			s.activeItem = 0;
 	}
 
-	inline void DrawRect(float x, float y, float w, float h, float r, float g, float b) {
-		glColor3f(r, g, b);
+	inline void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f) {
+		glColor4f(r, g, b, a);
 		glBegin(GL_QUADS);
 		glVertex2f(x, y);
 		glVertex2f(x + w, y);
@@ -243,7 +243,7 @@ namespace NSImgui {
 		return layout;
 	}
 
-	inline bool BeginWindow(const char* title, float x, float y, float w, float h, bool* pOpen = nullptr) {
+	inline bool BeginWindow(const char* title, float x, float y, float w, float h, float alpha, bool* pOpen = nullptr) {
 		State& s = GetState();
 		WindowState* win = CreateOrGetWindow(title, x, y, w, h);
 		if (!win->open) return false;
@@ -277,8 +277,8 @@ namespace NSImgui {
 		}
 		if (!s.mouseDown) win->resizing = false;
 		if (win->resizing) {
-			win->w = (64.0f, win->resizeStartW + (mx - win->resizeStartX));
-			win->h = NMATH::maxf(48.0f, win->resizeStartH + (my - win->resizeStartY));
+			win->w = NMATH::maxf(128.0f, win->resizeStartW + (mx - win->resizeStartX));
+			win->h = NMATH::maxf(96.0f, win->resizeStartH + (my - win->resizeStartY));
 		}
 
 		// Close
@@ -289,7 +289,7 @@ namespace NSImgui {
 		}
 
 		// Draw window background and border
-		DrawRect(win->x, win->y, win->w, win->h, 0.92f, 0.92f, 0.98f);
+		DrawRect(win->x, win->y, win->w, win->h, 0.92f, 0.92f, 0.98f, alpha);
 		DrawRectOutline(win->x, win->y, win->w, win->h, 0.2f, 0.2f, 0.3f);
 
 		// Draw title bar
@@ -393,6 +393,8 @@ namespace NSImgui {
 
 	// Call before drawing GUI widgets
 	inline void BeginGUI(int fbWidth, int fbHeight) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glMatrixMode(GL_PROJECTION);
 		glPushMatrix();
 		glLoadIdentity();
@@ -405,6 +407,7 @@ namespace NSImgui {
 
 	// Call after drawing GUI widgets
 	inline void EndGUI() {
+		glDisable(GL_BLEND);
 		glEnable(GL_DEPTH_TEST);
 		glMatrixMode(GL_MODELVIEW);
 		glPopMatrix();

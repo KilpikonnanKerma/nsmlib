@@ -23,6 +23,9 @@ int main() {
 	bool show_demo = false;
 	bool prevMouseDown = false;
 
+	int fbw, fbh;
+	window.getSize(fbw, fbh);
+
 	while (!window.shouldClose()) {
 		window.pollEvents();
 
@@ -53,11 +56,24 @@ int main() {
 
 		NSImgui::BeginGUI(fbw, fbh);
 
+		NSImgui::LayoutGlobalDockedWindows(0, 0, (float)fbw, (float)fbh);
+
 		static bool show_demo = true;
 		if (NSImgui::BeginWindow("Demo Window", 100, 100, 240, 180, 1.f, &show_demo)) {
- 			if (NSImgui::Button("Rotate")) angle += 10.0f;
+			if (NSImgui::Button("Rotate")) angle -= 10.0f;
 			NSImgui::EndWindow();
 		}
+
+		if (NSImgui::BeginWindow("Demo Window 2", 500, 100, 240, 180, 1.f, &show_demo)) {
+			if (NSImgui::Button("Rotate CCW")) angle += 10.0f;
+			NSImgui::EndWindow();
+		}
+
+		NSImgui::EndFrame(0, 0, (float)fbw, (float)fbh);
+		NSImgui::EndGUI();
+
+		glDisable(GL_BLEND);
+		glEnable(GL_DEPTH_TEST);
 
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
@@ -72,10 +88,6 @@ int main() {
 		glColor3f(0, 1, 0); glVertex2f(-0.5f, -0.5f);
 		glColor3f(0, 0, 1); glVertex2f(0.5f, -0.5f);
 		glEnd();
-
-		NSImgui::EndGUI();
-
-		NSImgui::EndFrame();
 
 		// Swap buffers
 		window.swapBuffers();

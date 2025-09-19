@@ -84,6 +84,8 @@ namespace NSWindow {
 		void setSize(int w, int h) { impl->setSize(w, h); }
 		void getSize(int& w, int& h) const { impl->getSize(w, h); }
 
+		void setTopMost(bool topmost) { impl->setWindowTopMost(*this, topmost); }
+
 		bool keyDown(int key) const { return impl->keyDown(key); }
 
 		bool mouseButtonDown(int button) const { return impl->mouseButtonDown(button); }
@@ -94,6 +96,8 @@ namespace NSWindow {
 		bool pollEvent(Event& e) { return impl->pollEvent(e); }
 
 		void swapBuffers() { impl->swapBuffers(); }
+
+		float getDPIScale() { return impl->getDpiScaleForWindow(*this); }
 
 #ifdef _WIN32
 		HWND hwnd() const { return static_cast<HWND>(impl->nativeHandle()); }
@@ -247,6 +251,24 @@ namespace NSWindow {
 				}
 			}
 
+			float getDpiScaleForWindow(const Window& win) {
+				HWND hwnd = static_cast<HWND>(win.nativeHandle());
+				HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+				UINT xdpi = 96, ydpi = 96;
+				typedef HRESULT(WINAPI* GetDpiForMonitorProc)(HMONITOR, int, UINT*, UINT*);
+				static HMODULE shcore = LoadLibraryA("shcore.dll");
+				static GetDpiForMonitorProc getDpi = shcore ? (GetDpiForMonitorProc)GetProcAddress(shcore, "GetDpiForMonitor") : nullptr;
+				if (getDpi) {
+					getDpi(monitor, 0 /* MDT_EFFECTIVE_DPI */, &xdpi, &ydpi);
+				} else {
+					HDC hdc = GetDC(hwnd);
+					xdpi = GetDeviceCaps(hdc, LOGPIXELSX);
+					ydpi = GetDeviceCaps(hdc, LOGPIXELSY);
+					ReleaseDC(hwnd, hdc);
+				}
+				return xdpi / 96.0f;
+			}
+
 			void pollEvents() {
 				MSG msg;
 				while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -276,6 +298,12 @@ namespace NSWindow {
 			void setSize(int w, int h) { SetWindowPos(hwnd, nullptr, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER); }
 			void getSize(int& w, int& h) const {
 				RECT r; GetClientRect(hwnd, &r); w = r.right - r.left; h = r.bottom - r.top;
+			}
+
+			inline void setWindowTopMost(Window& win, bool topmost) {
+				HWND hwnd = static_cast<HWND>(win.nativeHandle());
+				SetWindowPos(hwnd, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			}
 
 			bool keyDown(int key) const {

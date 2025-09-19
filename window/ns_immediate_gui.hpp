@@ -1,11 +1,17 @@
 /*
+	ns_immediate_gui.hpp
 
 	Copyright (C) 2025 Nico Rajala. All rights reserved.
 
-	ns_immediate_gui.hpp
-
 	An immediate mode GUI library for use with NSWindow library.
 
+	Use at your own risk. No warranties are provided.
+
+	---
+
+	An immediate mode gui is defined and rendered every frame. It does not retain any state
+	between frames, except for what the user of the library stores. This makes it very
+	simple to use and integrate into existing rendering loops.
 */
 
 #ifndef NS_IMMEDIATE_GUI_HPP
@@ -122,10 +128,14 @@ namespace NSImgui {
 		{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}  // (del)
 	};
 
+	struct WindowState;
 	struct State {
 		int mouseX, mouseY;
 		bool mouseDown, mousePressed, mouseReleased;
 		int hotItem, activeItem, lastWidget;
+		int selectedWindow;
+		WindowState* draggingWindow = nullptr;
+		int dockHoverTarget = -1; // 0=left,1=right,2=top,3=bottom,4=center,-1=none
 	};
 
 	inline State& GetState() {
@@ -142,12 +152,6 @@ namespace NSImgui {
 		s.mouseReleased = mouseReleased;
 		s.hotItem = 0;
 		s.lastWidget = 0;
-	}
-
-	inline void EndFrame() {
-		State& s = GetState();
-		if (s.mouseReleased)
-			s.activeItem = 0;
 	}
 
 	inline void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f) {
@@ -196,6 +200,15 @@ namespace NSImgui {
 			DrawChar(cx, y, *c, r, g, b);
 	}
 
+	enum ResizeDir {
+		None = 0,
+		Left = 1,
+		Right = 2,
+		Bottom = 4,
+		BottomLeft = Left | Bottom,
+		BottomRight = Right | Bottom
+	};
+
 	struct WindowState {
 		char title[64];
 		float x, y, w, h;
@@ -205,6 +218,16 @@ namespace NSImgui {
 		float moveOffsetX = 0, moveOffsetY = 0;
 		float resizeStartW = 0, resizeStartH = 0;
 		float resizeStartX = 0, resizeStartY = 0;
+
+		float userWidth = 0, userHeight = 0;
+		bool userSized = false;
+
+		float resizeStartWinX = 0;
+		int resizingDir = 0;
+
+		std::vector<WindowState*> dockedChildren;
+		WindowState* dockParent = nullptr;
+		int dockedTo = -1; // 0=left,1=right,2=top,3=bottom,4=center,-1=none
 	};
 
 	inline std::vector<WindowState>& GetWindows() {
@@ -228,6 +251,9 @@ namespace NSImgui {
 			std::strncpy(win->title, title, 63);
 			win->title[63] = 0;
 			win->x = x; win->y = y; win->w = w; win->h = h; win->open = true;
+			win->dockParent = nullptr;
+			win->dockedChildren.clear();
+			win->dockedTo = -1;
 		}
 		return win;
 	}
@@ -243,80 +269,139 @@ namespace NSImgui {
 		return layout;
 	}
 
-	inline bool BeginWindow(const char* title, float x, float y, float w, float h, float alpha, bool* pOpen = nullptr) {
-		State& s = GetState();
-		WindowState* win = CreateOrGetWindow(title, x, y, w, h);
-		if (!win->open) return false;
-		if (pOpen) *pOpen = win->open;
+	inline int GetWindowIndex(WindowState* win) {
+		auto& ws = GetWindows();
+		for (size_t i = 0; i < ws.size(); i++) {
+			if (&ws[i] == win) return (int)i;
+		}
+		return -1;
+	}
 
-		// Window interaction
+	void handleResize(State& s, WindowState* win) {
 		float mx = (float)s.mouseX, my = (float)s.mouseY;
-		bool titleHovered = mx >= win->x && mx <= win->x + win->w && my >= win->y && my <= win->y + 24;
-		bool resizeHovered = mx >= win->x + win->w - 12 && mx <= win->x + win->w && my >= win->y + win->h - 12 && my <= win->y + win->h;
-		bool closeHovered = mx >= win->x + win->w - 24 && mx <= win->x + win->w - 8 && my >= win->y + 4 && my <= win->y + 20;
+		int winIdx = GetWindowIndex(win);
 
-		// Move
-		if (titleHovered && s.mousePressed && !resizeHovered && !closeHovered) {
-			win->moving = true;
-			win->moveOffsetX = mx - win->x;
-			win->moveOffsetY = my - win->y;
+		const float edge = 6.0f;
+
+		// Determine allowed resize directions based on docking
+		bool allowLeft = true, allowRight = true, allowBottom = true;
+		if (win->dockedTo != -1) {
+			switch (win->dockedTo) {
+			case 0: // left
+			case 1: // right
+				allowLeft = allowRight = true;
+				allowBottom = false;
+				break;
+			case 2: // top
+			case 3: // bottom
+				allowLeft = allowRight = false;
+				allowBottom = true;
+				break;
+			case 4: // center
+			default:
+				allowLeft = allowRight = allowBottom = true;
+				break;
+			}
 		}
-		if (!s.mouseDown) win->moving = false;
-		if (win->moving) {
-			win->x = mx - win->moveOffsetX;
-			win->y = my - win->moveOffsetY;
+		switch (win->dockedTo) {
+		case 0: // left
+		case 1: // right
+			allowLeft = allowRight = true;
+			allowBottom = false;
+			break;
+		case 2: // top
+		case 3: // bottom
+			allowLeft = allowRight = false;
+			allowBottom = true;
+			break;
+		case 4: // center
+		case -1: // undocked
+		default:
+			allowLeft = allowRight = allowBottom = true;
+			break;
 		}
 
-		// Resize
-		if (resizeHovered && s.mousePressed) {
-			win->resizing = true;
-			win->resizeStartW = win->w;
-			win->resizeStartH = win->h;
-			win->resizeStartX = mx;
-			win->resizeStartY = my;
+		bool overLeft = allowLeft && mx >= win->x - edge && mx <= win->x + edge && my > win->y + 24 && my < win->y + win->h - edge;
+		bool overRight = allowRight && mx >= win->x + win->w - edge && mx <= win->x + win->w + edge && my > win->y + 24 && my < win->y + win->h - edge;
+		bool overBottom = allowBottom && mx >= win->x + edge && mx <= win->x + win->w - edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+		bool overBL = allowLeft && allowBottom && mx >= win->x - edge && mx <= win->x + edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+		bool overBR = allowRight && allowBottom && mx >= win->x + win->w - edge && mx <= win->x + win->w + edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+
+		if (s.selectedWindow == winIdx && s.mousePressed) {
+			if (overBL) win->resizingDir = ResizeDir::BottomLeft;
+			else if (overBR) win->resizingDir = ResizeDir::BottomRight;
+			else if (overLeft) win->resizingDir = ResizeDir::Left;
+			else if (overRight) win->resizingDir = ResizeDir::Right;
+			else if (overBottom) win->resizingDir = ResizeDir::Bottom;
+			else win->resizingDir = ResizeDir::None;
+
+			if (win->resizingDir != ResizeDir::None) {
+				win->resizing = true;
+				win->resizeStartW = win->w;
+				win->resizeStartH = win->h;
+				win->resizeStartX = mx;
+				win->resizeStartY = my;
+				win->resizeStartWinX = win->x;
+			}
 		}
-		if (!s.mouseDown) win->resizing = false;
+		if (!s.mouseDown) {
+			win->resizing = false;
+			win->resizingDir = ResizeDir::None;
+		}
+
 		if (win->resizing) {
-			win->w = NMATH::maxf(128.0f, win->resizeStartW + (mx - win->resizeStartX));
-			win->h = NMATH::maxf(96.0f, win->resizeStartH + (my - win->resizeStartY));
+			float minW = 128.0f, minH = 96.0f;
+			if (win->resizingDir & ResizeDir::Left) {
+				float dx = mx - win->resizeStartX;
+				float newW = NMATH::maxf(minW, win->resizeStartW - dx);
+				float newX = win->resizeStartWinX + dx;
+				if (newW > minW) {
+					win->x = newX;
+					win->w = newW;
+				}
+			}
+			if (win->resizingDir & ResizeDir::Right) {
+				float dx = mx - win->resizeStartX;
+				win->w = NMATH::maxf(minW, win->resizeStartW + dx);
+			}
+			if (win->resizingDir & ResizeDir::Bottom) {
+				float dy = my - win->resizeStartY;
+				win->h = NMATH::maxf(minH, win->resizeStartH + dy);
+			}
+			// Store user size for docked windows
+			if (win->dockedTo == 0 || win->dockedTo == 1) { // left/right
+				win->userWidth = win->w;
+				win->userSized = true;
+			}
+			if (win->dockedTo == 2 || win->dockedTo == 3) { // top/bottom
+				win->userHeight = win->h;
+				win->userSized = true;
+			}
 		}
 
-		// Close
-		if (closeHovered && s.mousePressed) {
-			win->open = false;
-			if (pOpen) *pOpen = false;
-			return false;
+		// Cursor
+		if (!win->resizing && s.selectedWindow == GetWindowIndex(win)) {
+			const float edge = 6.0f;
+			float mx = (float)s.mouseX, my = (float)s.mouseY;
+			bool overLeft = mx >= win->x - edge && mx <= win->x + edge && my > win->y + 24 && my < win->y + win->h - edge;
+			bool overRight = mx >= win->x + win->w - edge && mx <= win->x + win->w + edge && my > win->y + 24 && my < win->y + win->h - edge;
+			bool overBottom = mx >= win->x + edge && mx <= win->x + win->w - edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+			bool overBL = mx >= win->x - edge && mx <= win->x + edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+			bool overBR = mx >= win->x + win->w - edge && mx <= win->x + win->w + edge && my >= win->y + win->h - edge && my <= win->y + win->h + edge;
+
+			if (overBL)
+				SetCursor(LoadCursor(NULL, IDC_SIZENESW));
+			else if (overBR)
+				SetCursor(LoadCursor(NULL, IDC_SIZENWSE));
+			else if (overLeft)
+				SetCursor(LoadCursor(NULL, IDC_SIZEWE));
+			else if (overRight)
+				SetCursor(LoadCursor(NULL, IDC_SIZEWE));
+			else if (overBottom)
+				SetCursor(LoadCursor(NULL, IDC_SIZENS));
+			else
+				SetCursor(LoadCursor(NULL, IDC_ARROW));
 		}
-
-		// Draw window background and border
-		DrawRect(win->x, win->y, win->w, win->h, 0.92f, 0.92f, 0.98f, alpha);
-		DrawRectOutline(win->x, win->y, win->w, win->h, 0.2f, 0.2f, 0.3f);
-
-		// Draw title bar
-		DrawRect(win->x, win->y, win->w, 24, 0.35f, 0.45f, 0.65f);
-		DrawRectOutline(win->x, win->y, win->w, 24, 0.2f, 0.2f, 0.3f);
-		DrawText(win->x + 8, win->y + 8, title, 1, 1, 1);
-
-		// Draw close button
-		DrawRect(win->x + win->w - 24, win->y + 4, 16, 16, closeHovered ? 0.8f : 0.7f, 0.3f, 0.3f);
-		DrawRectOutline(win->x + win->w - 24, win->y + 4, 16, 16, 0.2f, 0.2f, 0.3f);
-		DrawText(win->x + win->w - 20, win->y + 8, "X", 1, 1, 1);
-
-		// Draw resize handle
-		DrawRect(win->x + win->w - 12, win->y + win->h - 12, 12, 12, resizeHovered ? 0.6f : 0.8f, 0.8f, 0.8f);
-		DrawRectOutline(win->x + win->w - 12, win->y + win->h - 12, 12, 12, 0.2f, 0.2f, 0.3f);
-
-		static Layout layout;
-		layout.win = win;
-		layout.startX = win->x + 8;
-		layout.startY = win->y + 32;
-		layout.cursorX = layout.startX;
-		layout.cursorY = layout.startY;
-		layout.availW = win->w - 16;
-		layout.spacingY = 8;
-		GetLayout() = &layout;
-
-		return true;
 	}
 
 	inline void EndWindow() {
@@ -415,6 +500,340 @@ namespace NSImgui {
 		glPopMatrix();
 	}
 
-} // namespace NSImgui
+	// Docking system
+
+	struct DockCube { float x, y, w, h; };
+
+	struct DockDragState {
+		WindowState* draggingWindow = nullptr;
+		int dockHoverTarget = -1; // 0=left,1=right,2=top,3=bottom,4=center,-1=none
+		WindowState* hoveredWindow = nullptr;
+		bool hoveredGlobal = false;
+		bool active = false;
+		float dragOffsetX = 0, dragOffsetY = 0;
+	};
+	inline DockDragState& GetDockDragState() {
+		static DockDragState state;
+		return state;
+	}
+
+	// Draw dock targets for a window
+	inline int DrawDockTargets(WindowState* win, float mx, float my, DockCube outCubes[5]) {
+		float x = win->x, y = win->y, w = win->w, h = win->h;
+		DockCube cubes[5] = {
+			{x, y + h / 4, w / 6, h / 2}, // left
+			{x + w - w / 6, y + h / 4, w / 6, h / 2}, // right
+			{x + w / 4, y, w / 2, h / 6}, // top
+			{x + w / 4, y + h - h / 6, w / 2, h / 6}, // bottom
+			{x + w / 4, y + h / 4, w / 2, h / 2} // center
+		};
+		int hovered = -1;
+		for (int i = 0; i < 5; ++i) {
+			bool isHovered = mx >= cubes[i].x && mx <= cubes[i].x + cubes[i].w &&
+				my >= cubes[i].y && my <= cubes[i].y + cubes[i].h;
+			DrawRect(cubes[i].x, cubes[i].y, cubes[i].w, cubes[i].h,
+				isHovered ? 0.3f : 0.2f, 0.5f, 1.0f, isHovered ? 0.5f : 0.3f);
+			if (isHovered) hovered = i;
+			if (outCubes) outCubes[i] = cubes[i];
+		}
+		return hovered;
+	}
+
+	// Draw dock targets for the global area (screen edges)
+	inline int DrawGlobalDockTargets(float gx, float gy, float gw, float gh, float mx, float my, DockCube outCubes[4]) {
+		// Only left/right/top/bottom, no center
+		DockCube cubes[4] = {
+			{gx, gy + gh / 4, gw / 32, gh / 2}, // left
+			{gx + gw - gw / 32, gy + gh / 4, gw / 32, gh / 2}, // right
+			{gx + gw / 4, gy, gw / 2, gh / 32}, // top
+			{gx + gw / 4, gy + gh - gh / 32, gw / 2, gh / 32} // bottom
+		};
+		int hovered = -1;
+		for (int i = 0; i < 4; ++i) {
+			bool isHovered = mx >= cubes[i].x && mx <= cubes[i].x + cubes[i].w &&
+				my >= cubes[i].y && my <= cubes[i].y + cubes[i].h;
+			DrawRect(cubes[i].x, cubes[i].y, cubes[i].w, cubes[i].h,
+				isHovered ? 0.3f : 0.2f, 0.7f, 1.0f, isHovered ? 0.5f : 0.3f);
+			if (isHovered) hovered = i;
+			if (outCubes) outCubes[i] = cubes[i];
+		}
+		return hovered;
+	}
+
+	// Remove a window from its parents dockedChildren
+	inline void RemoveFromParent(WindowState* win) {
+		if (win->dockParent) {
+			auto& siblings = win->dockParent->dockedChildren;
+			siblings.erase(std::remove(siblings.begin(), siblings.end(), win), siblings.end());
+			win->dockParent = nullptr;
+			win->dockedTo = -1;
+		}
+	}
+
+	inline bool IsDescendant(WindowState* win, WindowState* possibleAncestor) {
+		while (win) {
+			if (win == possibleAncestor) return true;
+			win = win->dockParent;
+		}
+		return false;
+	}
+
+	// Dock a window into another window or the global area
+	inline void DockWindow(WindowState* win, WindowState* target, int dockTarget) {
+		if (win == target || IsDescendant(win, target)) return;
+
+		RemoveFromParent(win);
+		if (target) {
+			win->dockParent = target;
+			win->dockedTo = dockTarget;
+			target->dockedChildren.push_back(win);
+			// Positioning will be handled in layout
+		}
+		else {
+			win->dockParent = nullptr;
+			win->dockedTo = dockTarget;
+		}
+	}
+
+	// Dock a window to the global area (no parent)
+	inline void DockWindowGlobal(WindowState* win, int dockTarget) {
+		RemoveFromParent(win);
+		win->dockParent = nullptr;
+		win->dockedTo = dockTarget;
+	}
+
+	// Layout docked children inside a window
+	inline void LayoutDockedChildren(WindowState* win) {
+		if (win->dockedChildren.empty()) return;
+		float x = win->x, y = win->y, w = win->w, h = win->h;
+		int n = (int)win->dockedChildren.size();
+		for (int i = 0; i < n; ++i) {
+			WindowState* child = win->dockedChildren[i];
+			switch (child->dockedTo) {
+			case 0: // left
+				child->x = x;
+				child->y = y;
+				child->w = w * 0.3f;
+				child->h = h;
+				break;
+			case 1: // right
+				child->x = x + w * 0.7f;
+				child->y = y;
+				child->w = w * 0.3f;
+				child->h = h;
+				break;
+			case 2: // top
+				child->x = x;
+				child->y = y;
+				child->w = w;
+				child->h = h * 0.3f;
+				break;
+			case 3: // bottom
+				child->x = x;
+				child->y = y + h * 0.7f;
+				child->w = w;
+				child->h = h * 0.3f;
+				break;
+			case 4: // center
+			default:
+				child->x = x + w * 0.15f;
+				child->y = y + h * 0.15f;
+				child->w = w * 0.7f;
+				child->h = h * 0.7f;
+				break;
+			}
+			LayoutDockedChildren(child);
+		}
+	}
+
+	// Layout all top-level windows (global area)
+	inline void LayoutGlobalDockedWindows(float gx, float gy, float gw, float gh) {
+		auto& windows = GetWindows();
+		for (auto& win : windows) {
+			if (!win.open) continue;
+			if (!win.dockParent && win.dockedTo != -1) {
+				// Layout based on dockedTo
+				switch (win.dockedTo) {
+				case 0: // left
+					win.x = gx;
+					win.y = gy;
+					win.w = win.userSized ? win.userWidth : gw * 0.3f;
+					win.h = gh;
+					break;
+				case 1: // right
+					win.w = win.userSized ? win.userWidth : gw * 0.3f;
+					win.x = gx + gw - win.w;
+					win.y = gy;
+					win.h = gh;
+					break;
+				case 2: // top
+					win.x = gx;
+					win.y = gy;
+					win.w = gw;
+					win.h = win.userSized ? win.userHeight : gh * 0.3f;
+					break;
+				case 3: // bottom
+					win.x = gx;
+					win.h = win.userSized ? win.userHeight : gh * 0.3f;
+					win.y = gy + gh - win.h;
+					win.w = gw;
+					break;
+				case 4: // center
+				default:
+					win.x = gx + gw * 0.15f;
+					win.y = gy + gh * 0.15f;
+					win.w = gw * 0.7f;
+					win.h = gh * 0.7f;
+					break;
+				}
+				LayoutDockedChildren(&win);
+			}
+		}
+	}
+
+	inline void EndFrame(float globalX, float globalY, float globalW, float globalH) {
+		State& s = GetState();
+		DockDragState& drag = GetDockDragState();
+		if (s.mouseReleased)
+			s.activeItem = 0;
+
+		if (drag.active && drag.draggingWindow) {
+			float mx = (float)s.mouseX, my = (float)s.mouseY;
+			DockCube cubes[5];
+			DockCube globalCubes[4];
+			drag.hoveredWindow = nullptr;
+			drag.hoveredGlobal = false;
+			drag.dockHoverTarget = -1;
+
+			// Check all windows for dock targets
+			auto& windows = GetWindows();
+			for (auto& win : windows) {
+				if (!win.open || &win == drag.draggingWindow) continue;
+				int hovered = DrawDockTargets(&win, mx, my, cubes);
+				if (hovered != -1) {
+					drag.hoveredWindow = &win;
+					drag.dockHoverTarget = hovered;
+				}
+			}
+			// Check global dock targets
+			int globalHovered = DrawGlobalDockTargets(globalX, globalY, globalW, globalH, mx, my, globalCubes);
+			if (globalHovered != -1) {
+				drag.hoveredWindow = nullptr;
+				drag.hoveredGlobal = true;
+				drag.dockHoverTarget = globalHovered;
+			}
+
+			// Move the window with the mouse
+			WindowState* win = drag.draggingWindow;
+			win->x = mx - drag.dragOffsetX;
+			win->y = my - drag.dragOffsetY;
+
+			// On mouse release, perform docking if over a dock target
+			if (s.mouseReleased) {
+				if (drag.dockHoverTarget != -1) {
+					if (drag.hoveredGlobal) {
+						DockWindowGlobal(win, drag.dockHoverTarget);
+					}
+					else if (drag.hoveredWindow) {
+						DockWindow(win, drag.hoveredWindow, drag.dockHoverTarget);
+					}
+				}
+				else {
+					// Undock if not released over a dock target
+					RemoveFromParent(win);
+					win->dockedTo = -1;
+				}
+				drag.draggingWindow = nullptr;
+				drag.active = false;
+			}
+		}
+	}
+
+	inline bool BeginWindow(const char* title, float x, float y, float w, float h, float alpha, bool* pOpen = nullptr) {
+		State& s = GetState();
+		DockDragState& drag = GetDockDragState();
+		auto& windows = GetWindows();
+		WindowState* win = CreateOrGetWindow(title, x, y, w, h);
+		if (!win->open) return false;
+		if (pOpen) *pOpen = win->open;
+
+		float mx = (float)s.mouseX, my = (float)s.mouseY;
+		bool titleHovered = mx >= win->x && mx <= win->x + win->w && my >= win->y && my <= win->y + 24;
+		bool resizeHovered = mx >= win->x + win->w - 12 && mx <= win->x + win->w && my >= win->y + win->h - 12 && my <= win->y + win->h;
+		bool closeHovered = mx >= win->x + win->w - 24 && mx <= win->x + win->w - 8 && my >= win->y + 4 && my <= win->y + 20;
+
+		int winIdx = GetWindowIndex(win);
+
+		// Start drag
+		if (titleHovered && s.mousePressed && !resizeHovered && !closeHovered) {
+			if (winIdx != (int)windows.size() - 1) {
+				WindowState temp = *win;
+				windows.erase(windows.begin() + winIdx);
+				windows.push_back(temp);
+				win = &windows.back();
+				winIdx = (int)windows.size() - 1;
+			}
+			s.selectedWindow = winIdx;
+			drag.draggingWindow = win;
+			drag.active = true;
+			drag.dragOffsetX = mx - win->x;
+			drag.dragOffsetY = my - win->y;
+
+			for (size_t i = 0; i < windows.size(); ++i)
+				windows[i].moving = false;
+			win->moving = true;
+			win->moveOffsetX = mx - win->x;
+			win->moveOffsetY = my - win->y;
+		}
+
+		if (s.selectedWindow == winIdx && win->moving && !drag.active) {
+			if (!s.mouseDown) win->moving = false;
+			else {
+				win->x = mx - win->moveOffsetX;
+				win->y = my - win->moveOffsetY;
+			}
+		}
+		else {
+			win->moving = false;
+		}
+
+		handleResize(s, win);
+
+		// Close
+		if (closeHovered && s.mousePressed) {
+			win->open = false;
+			RemoveFromParent(win);
+			if (pOpen) *pOpen = false;
+			return false;
+		}
+
+		// Draw window background and border
+		DrawRect(win->x, win->y, win->w, win->h, 0.30f, 0.30f, 0.30f, alpha);
+		DrawRectOutline(win->x, win->y, win->w, win->h, 0.2f, 0.2f, 0.3f);
+		// Draw title bar
+		float barShade = (s.selectedWindow == winIdx) ? 0.07f : 0.13f;
+		DrawRect(win->x, win->y, win->w, 24, barShade, barShade, barShade);
+		DrawRectOutline(win->x, win->y, win->w, 24, 0.2f, 0.2f, 0.3f);
+		DrawText(win->x + 8, win->y + 8, title, 1, 1, 1);
+
+		// Draw close button
+		DrawRect(win->x + win->w - 24, win->y + 4, 16, 16, closeHovered ? 0.8f : 0.7f, 0.3f, 0.3f);
+		DrawRectOutline(win->x + win->w - 24, win->y + 4, 16, 16, 0.2f, 0.2f, 0.3f);
+		DrawText(win->x + win->w - 20, win->y + 8, "X", 1, 1, 1);
+
+		static Layout layout;
+		layout.win = win;
+		layout.startX = win->x + 8;
+		layout.startY = win->y + 32;
+		layout.cursorX = layout.startX;
+		layout.cursorY = layout.startY;
+		layout.availW = win->w - 16;
+		layout.spacingY = 8;
+		GetLayout() = &layout;
+
+		return true;
+	}
+
+}
 
 #endif

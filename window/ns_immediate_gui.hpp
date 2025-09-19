@@ -128,6 +128,7 @@ namespace NSImgui {
 		{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}  // (del)
 	};
 
+	// --- Core types and state and stuff ---
 	struct WindowState;
 	struct State {
 		int mouseX, mouseY;
@@ -137,68 +138,6 @@ namespace NSImgui {
 		WindowState* draggingWindow = nullptr;
 		int dockHoverTarget = -1; // 0=left,1=right,2=top,3=bottom,4=center,-1=none
 	};
-
-	inline State& GetState() {
-		static State state;
-		return state;
-	}
-
-	inline void NewFrame(int mouseX, int mouseY, bool mouseDown, bool mousePressed, bool mouseReleased) {
-		State& s = GetState();
-		s.mouseX = mouseX;
-		s.mouseY = mouseY;
-		s.mouseDown = mouseDown;
-		s.mousePressed = mousePressed;
-		s.mouseReleased = mouseReleased;
-		s.hotItem = 0;
-		s.lastWidget = 0;
-	}
-
-	inline void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f) {
-		glColor4f(r, g, b, a);
-		glBegin(GL_QUADS);
-		glVertex2f(x, y);
-		glVertex2f(x + w, y);
-		glVertex2f(x + w, y + h);
-		glVertex2f(x, y + h);
-		glEnd();
-	}
-
-	inline void DrawRectOutline(float x, float y, float w, float h, float r, float g, float b) {
-		glColor3f(r, g, b);
-		glBegin(GL_LINE_LOOP);
-		glVertex2f(x, y);
-		glVertex2f(x + w, y);
-		glVertex2f(x + w, y + h);
-		glVertex2f(x, y + h);
-		glEnd();
-	}
-
-	inline void DrawChar(float x, float y, char c, float r, float g, float b) {
-		if (c < 32 || c > 127) return;
-		const unsigned char* bitmap = font8x8_basic[c - 32];
-		glColor3f(r, g, b);
-		for (int row = 0; row < 8; ++row) {
-			for (int col = 0; col < 8; ++col) {
-				if (bitmap[row] & (1 << col)) {
-					float px = x + col;
-					float py = y + row;
-					glBegin(GL_QUADS);
-					glVertex2f(px, py);
-					glVertex2f(px + 1, py);
-					glVertex2f(px + 1, py + 1);
-					glVertex2f(px, py + 1);
-					glEnd();
-				}
-			}
-		}
-	}
-
-	inline void DrawText(float x, float y, const char* text, float r = 0, float g = 0, float b = 0) {
-		float cx = x;
-		for (const char* c = text; *c; ++c, cx += 8.0f)
-			DrawChar(cx, y, *c, r, g, b);
-	}
 
 	enum ResizeDir {
 		None = 0,
@@ -222,6 +161,9 @@ namespace NSImgui {
 		float userWidth = 0, userHeight = 0;
 		bool userSized = false;
 
+		float prevFloatX = 0, prevFloatY = 0, prevFloatW = 0, prevFloatH = 0;
+		bool hasPrevFloatRect = false;
+
 		float resizeStartWinX = 0;
 		int resizingDir = 0;
 
@@ -229,6 +171,37 @@ namespace NSImgui {
 		WindowState* dockParent = nullptr;
 		int dockedTo = -1; // 0=left,1=right,2=top,3=bottom,4=center,-1=none
 	};
+
+	struct Layout {
+		float cursorX, cursorY, startX, startY, availW;
+		float spacingY;
+		WindowState* win;
+	};
+
+	inline Layout*& GetLayout() {
+		static Layout* layout = nullptr;
+		return layout;
+	}
+
+	constexpr float WidgetMargin = 4.0f;
+
+	// --- State management, windowing and layout stuff --- 
+
+	inline State& GetState() {
+		static State state;
+		return state;
+	}
+
+	inline void NewFrame(int mouseX, int mouseY, bool mouseDown, bool mousePressed, bool mouseReleased) {
+		State& s = GetState();
+		s.mouseX = mouseX;
+		s.mouseY = mouseY;
+		s.mouseDown = mouseDown;
+		s.mousePressed = mousePressed;
+		s.mouseReleased = mouseReleased;
+		s.hotItem = 0;
+		s.lastWidget = 0;
+	}
 
 	inline std::vector<WindowState>& GetWindows() {
 		static std::vector<WindowState> windows;
@@ -256,17 +229,6 @@ namespace NSImgui {
 			win->dockedTo = -1;
 		}
 		return win;
-	}
-
-	struct Layout {
-		float cursorX, cursorY, startX, startY, availW;
-		float spacingY;
-		WindowState* win;
-	};
-
-	inline Layout*& GetLayout() {
-		static Layout* layout = nullptr;
-		return layout;
 	}
 
 	inline int GetWindowIndex(WindowState* win) {
@@ -408,6 +370,56 @@ namespace NSImgui {
 		GetLayout() = nullptr;
 	}
 
+	// --- Drawing ---
+
+	inline void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f) {
+		glColor4f(r, g, b, a);
+		glBegin(GL_QUADS);
+		glVertex2f(x, y);
+		glVertex2f(x + w, y);
+		glVertex2f(x + w, y + h);
+		glVertex2f(x, y + h);
+		glEnd();
+	}
+
+	inline void DrawRectOutline(float x, float y, float w, float h, float r, float g, float b) {
+		glColor3f(r, g, b);
+		glBegin(GL_LINE_LOOP);
+		glVertex2f(x, y);
+		glVertex2f(x + w, y);
+		glVertex2f(x + w, y + h);
+		glVertex2f(x, y + h);
+		glEnd();
+	}
+
+	inline void DrawChar(float x, float y, char c, float r, float g, float b) {
+		if (c < 32 || c > 127) return;
+		const unsigned char* bitmap = font8x8_basic[c - 32];
+		glColor3f(r, g, b);
+		for (int row = 0; row < 8; ++row) {
+			for (int col = 0; col < 8; ++col) {
+				if (bitmap[row] & (1 << col)) {
+					float px = x + col;
+					float py = y + row;
+					glBegin(GL_QUADS);
+					glVertex2f(px, py);
+					glVertex2f(px + 1, py);
+					glVertex2f(px + 1, py + 1);
+					glVertex2f(px, py + 1);
+					glEnd();
+				}
+			}
+		}
+	}
+
+	inline void DrawText(float x, float y, const char* text, float r = 0, float g = 0, float b = 0) {
+		float cx = x;
+		for (const char* c = text; *c; ++c, cx += 8.0f)
+			DrawChar(cx, y, *c, r, g, b);
+	}
+
+	// --- Widgets ---
+
 	inline bool Button(const char* label, float x, float y, float w, float h) {
 		State& s = GetState();
 		int id = ++s.lastWidget;
@@ -459,6 +471,101 @@ namespace NSImgui {
 		return changed;
 	}
 
+	inline void Label(const char* text) {
+		Layout* l = GetLayout();
+		if (!l) return;
+		float x = l->cursorX + WidgetMargin;
+		float y = l->cursorY;
+		DrawText(x, y + 4, text, 1, 1, 1);
+		l->cursorY += 20 + l->spacingY;
+	}
+
+	inline bool SliderFloat(const char* label, float* value, float min, float max) {
+		Layout* l = GetLayout();
+		if (!l) return false;
+		float x = l->cursorX + WidgetMargin;
+		float y = l->cursorY;
+		float w = l->availW - WidgetMargin;
+		float h = 20.0f;
+		bool changed = false;
+
+		// Draw background
+		DrawRect(x, y, w, h, 0.85f, 0.85f, 0.90f);
+		DrawRectOutline(x, y, w, h, 0.2f, 0.2f, 0.3f);
+
+		// Calculate handle position
+		float t = (*value - min) / (max - min);
+		t = NMATH::clamp(t, 0.0f, 1.0f);
+		float handleX = x + t * (w - 16);
+
+		// Handle mouse
+		State& s = GetState();
+		int id = ++s.lastWidget;
+		bool hovered = s.mouseX >= x && s.mouseX <= x + w && s.mouseY >= y && s.mouseY <= y + h;
+		if (hovered) s.hotItem = id;
+		static bool dragging = false;
+		static int dragId = 0;
+		if (hovered && s.mousePressed) {
+			dragging = true;
+			dragId = id;
+		}
+		if (!s.mouseDown) dragging = false;
+		if (dragging && dragId == id) {
+			float rel = (s.mouseX - x) / (w - 16);
+			rel = NMATH::clamp(rel, 0.0f, 1.0f);
+			float newValue = min + rel * (max - min);
+			if (newValue != *value) {
+				*value = newValue;
+				changed = true;
+			}
+		}
+
+		// Draw handle
+		DrawRect(handleX, y, 16, h, 0.4f, 0.5f, 0.8f);
+
+		// Draw label and value
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%s: %.2f", label, *value);
+		DrawText(x + 8, y + 4, buf, 0, 0, 0);
+
+		l->cursorY += h + l->spacingY;
+		return changed;
+	}
+
+	inline bool InputText(const char* label, char* buffer, int bufsize) {
+		Layout* l = GetLayout();
+		if (!l) return false;
+		float x = l->cursorX + WidgetMargin;
+		float y = l->cursorY;
+		float w = l->availW - WidgetMargin;
+		float h = 20.0f;
+		bool changed = false;
+
+		// Draw background
+		DrawRect(x, y, w, h, 1, 1, 1);
+		DrawRectOutline(x, y, w, h, 0.2f, 0.2f, 0.3f);
+
+		// Handle mouse and keyboard
+		State& s = GetState();
+		int id = ++s.lastWidget;
+		bool hovered = s.mouseX >= x && s.mouseX <= x + w && s.mouseY >= y && s.mouseY <= y + h;
+		static int activeInput = 0;
+		if (hovered && s.mousePressed) activeInput = id;
+		bool active = (activeInput == id);
+
+		// Draw text
+		DrawText(x + 8, y + 4, buffer, 0, 0, 0);
+
+		// Draw label
+		DrawText(x + w - 8 - 8 * strlen(label), y + 4, label, 0.4f, 0.4f, 0.4f);
+
+		// (You need to call this from your app's key input handler)
+		// Example: if (active) { ... handle key input, update buffer, set changed = true; }
+
+		l->cursorY += h + l->spacingY;
+		return changed;
+	}
+
 	// In window versions
 	inline bool Button(const char* label, float w = 80, float h = 30) {
 		Layout* l = GetLayout();
@@ -475,6 +582,8 @@ namespace NSImgui {
 		l->cursorY += 16 + l->spacingY;
 		return Checkbox(label, value, x, y);
 	}
+
+	// --- GUI frame management ---
 
 	// Call before drawing GUI widgets
 	inline void BeginGUI(int fbWidth, int fbHeight) {
@@ -500,7 +609,7 @@ namespace NSImgui {
 		glPopMatrix();
 	}
 
-	// Docking system
+	// --- Docking system ---
 
 	struct DockCube { float x, y, w, h; };
 
@@ -582,6 +691,14 @@ namespace NSImgui {
 	inline void DockWindow(WindowState* win, WindowState* target, int dockTarget) {
 		if (win == target || IsDescendant(win, target)) return;
 
+		if (win->dockedTo == -1) {
+			win->prevFloatX = win->x;
+			win->prevFloatY = win->y;
+			win->prevFloatW = win->w;
+			win->prevFloatH = win->h;
+			win->hasPrevFloatRect = true;
+		}
+
 		RemoveFromParent(win);
 		if (target) {
 			win->dockParent = target;
@@ -597,6 +714,14 @@ namespace NSImgui {
 
 	// Dock a window to the global area (no parent)
 	inline void DockWindowGlobal(WindowState* win, int dockTarget) {
+		if (win->dockedTo == -1) {
+			win->prevFloatX = win->x;
+			win->prevFloatY = win->y;
+			win->prevFloatW = win->w;
+			win->prevFloatH = win->h;
+			win->hasPrevFloatRect = true;
+		}
+
 		RemoveFromParent(win);
 		win->dockParent = nullptr;
 		win->dockedTo = dockTarget;
@@ -609,6 +734,8 @@ namespace NSImgui {
 		int n = (int)win->dockedChildren.size();
 		for (int i = 0; i < n; ++i) {
 			WindowState* child = win->dockedChildren[i];
+			if (child->dockedTo == -1) continue;
+
 			switch (child->dockedTo) {
 			case 0: // left
 				child->x = x;
@@ -715,6 +842,7 @@ namespace NSImgui {
 					drag.dockHoverTarget = hovered;
 				}
 			}
+
 			// Check global dock targets
 			int globalHovered = DrawGlobalDockTargets(globalX, globalY, globalW, globalH, mx, my, globalCubes);
 			if (globalHovered != -1) {
@@ -723,8 +851,29 @@ namespace NSImgui {
 				drag.dockHoverTarget = globalHovered;
 			}
 
-			// Move the window with the mouse
 			WindowState* win = drag.draggingWindow;
+
+			// If window is docked and not over any dock target, undock immediately
+			if (win->dockedTo != -1 && drag.dockHoverTarget == -1) {
+				RemoveFromParent(win);
+				win->dockedTo = -1;
+				if (win->hasPrevFloatRect) {
+					win->x = win->prevFloatX;
+					win->y = win->prevFloatY;
+					win->w = win->prevFloatW;
+					win->h = win->prevFloatH;
+				}
+				// Recalculate drag offset so window sticks to mouse on title bar
+				float titleBarY = win->y;
+				float titleBarH = 24.0f;
+				if (my < titleBarY || my > titleBarY + titleBarH)
+					drag.dragOffsetY = titleBarH / 2.0f;
+				else
+					drag.dragOffsetY = my - win->y;
+				drag.dragOffsetX = mx - win->x;
+			}
+
+			// Move the window with the mouse
 			win->x = mx - drag.dragOffsetX;
 			win->y = my - drag.dragOffsetY;
 
@@ -737,11 +886,6 @@ namespace NSImgui {
 					else if (drag.hoveredWindow) {
 						DockWindow(win, drag.hoveredWindow, drag.dockHoverTarget);
 					}
-				}
-				else {
-					// Undock if not released over a dock target
-					RemoveFromParent(win);
-					win->dockedTo = -1;
 				}
 				drag.draggingWindow = nullptr;
 				drag.active = false;
@@ -764,8 +908,9 @@ namespace NSImgui {
 
 		int winIdx = GetWindowIndex(win);
 
-		// Start drag
-		if (titleHovered && s.mousePressed && !resizeHovered && !closeHovered) {
+		bool insideWindow = mx >= win->x && mx <= win->x + win->w && my >= win->y && my <= win->y + win->h;
+		if (insideWindow && s.mousePressed && !closeHovered && !resizeHovered) {
+			// Bring to front and select
 			if (winIdx != (int)windows.size() - 1) {
 				WindowState temp = *win;
 				windows.erase(windows.begin() + winIdx);
@@ -774,11 +919,13 @@ namespace NSImgui {
 				winIdx = (int)windows.size() - 1;
 			}
 			s.selectedWindow = winIdx;
+		}
+
+		if (titleHovered && s.mousePressed && !resizeHovered && !closeHovered) {
 			drag.draggingWindow = win;
 			drag.active = true;
 			drag.dragOffsetX = mx - win->x;
 			drag.dragOffsetY = my - win->y;
-
 			for (size_t i = 0; i < windows.size(); ++i)
 				windows[i].moving = false;
 			win->moving = true;

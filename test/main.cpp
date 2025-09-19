@@ -61,6 +61,14 @@ int main() {
 		static bool show_demo = true;
 		if (NSImgui::BeginWindow("Demo Window", 100, 100, 240, 180, 1.f, &show_demo)) {
 			if (NSImgui::Button("Rotate")) angle -= 10.0f;
+
+			NSImgui::Label("This is a label");
+
+			static float val = 50.f;
+			NSImgui::SliderFloat("Value", &val, 0.f, 100.f);
+
+			static char text[64] = "Edit me";
+			NSImgui::InputText("Input", text, 64);
 			NSImgui::EndWindow();
 		}
 
